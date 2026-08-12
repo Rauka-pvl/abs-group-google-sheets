@@ -62,23 +62,27 @@ cp .env.example .env
 
 ## Установка и запуск
 
+Нужен **Node.js 18+** (лучше 20 LTS). На Plesk/хостинге в настройках Node.js приложения выберите версию **18/20**, не 10/12/14.
+
 ```bash
-npm install
-
-# полная синхронизация по команде (входящий webhook)
-npm run sync:preview
+npm install          # соберёт dist/ через postinstall
+npm start            # production: node dist/server.js
+npm run sync         # полная синхронизация
 npm run sync:dry
-npm run sync
-
-# realtime-сервер для исходящего webhook
-npm start
-# или с автоперезапуском:
-npm run dev
+npm run sync:preview
 ```
 
-Проверка сервера: `GET /health` → `{ "ok": true }`
+Локальная разработка:
 
-На VPS можно держать `npm start` через systemd/pm2, а `npm run sync` оставить для ручной/cron полной сверки.
+```bash
+npm run dev          # tsx watch
+npm run dev:sync
+```
+
+На хостинге startup-файл: `dist/server.js` (или команда `npm start`).  
+Проверка: `GET /health` → `{ "ok": true }`
+
+Если ошибка `SyntaxError: Unexpected token {` в `tsx` — это старый Node. Обновите версию Node в панели хостинга.
 
 ## Колонки листа «Снабжения»
 

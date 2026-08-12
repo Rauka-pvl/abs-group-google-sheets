@@ -5,26 +5,29 @@
   "description": "Sync Bitrix24 accounting SPA cards to Google Sheets",
   "type": "module",
   "scripts": {
-    "sync": "tsx src/cli.ts",
-    "sync:dry": "tsx src/cli.ts --dry-run",
-    "sync:preview": "tsx src/cli.ts --preview",
-    "start": "tsx src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "sync": "node dist/cli.js",
+    "sync:dry": "node dist/cli.js --dry-run",
+    "sync:preview": "node dist/cli.js --preview",
     "dev": "tsx watch src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "dev:sync": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "postinstall": "npm run build"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "dotenv": "^16.4.7",
-    "express": "^5.2.1",
-    "googleapis": "^144.0.0"
-  },
-  "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^22.10.5",
-    "@types/qs": "^6.15.1",
-    "tsx": "^4.19.2",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "googleapis": "^144.0.0",
     "typescript": "^5.7.3"
+  },
+  "devDependencies": {
+    "@types/qs": "^6.15.1",
+    "tsx": "^4.19.2"
   }
 }

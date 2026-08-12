@@ -2,6 +2,14 @@ import express from "express";
 import { config } from "./config.js";
 import { handleBitrixEvent } from "./sync/service.js";
 
+const nodeMajor = Number(process.versions.node.split(".")[0] ?? "0");
+if (nodeMajor < 18) {
+  console.error(
+    `Node.js ${process.versions.node} is too old. Install Node.js 18+ (recommended 20 LTS) in the hosting panel, then redeploy.`,
+  );
+  process.exit(1);
+}
+
 type BitrixWebhookBody = {
   event?: string;
   data?: {
