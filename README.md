@@ -1,99 +1,83 @@
-# Bitrix → Google Sheets (Бухгалтерия)
+# Bitrix → Google Sheets (Python)
 
-Синхронизация карточек смарт-процесса **«Заявка в бухгалтерию»** (`entityTypeId=1106`) в лист Google Таблицы **«Снабжения»**.
+Синхронизация смарт-процесса **«Заявка в бухгалтерию»** (`entityTypeId=1106`) в лист **«Снабжения»**.
 
 Воронки: Служебные записки (62), Счета на оплату (66), Командировочные (68).
 
-Два режима:
+## Режимы
 
-1. **CLI** (`npm run sync`) — полная подтяжка через **входящий** webhook Bitrix
-2. **Realtime** (`npm start`) — сервер `POST /action` для **исходящего** webhook Bitrix
+1. **CLI** — полная подтяжка через входящий webhook Bitrix  
+2. **Realtime** — Flask `POST /action` для исходящего webhook
 
 ## Важно про события
 
-Эти воронки — **не классические сделки**, а смарт-процесс.  
-`ONCRMDEALADD / ONCRMDEALUPDATE / ONCRMDEALDELETE` для них **не сработают**.
-
-В исходящем вебхуке укажите:
+Нужны события смарт-процесса (не сделки):
 
 - `ONCRMDYNAMICITEMADD`
 - `ONCRMDYNAMICITEMUPDATE`
 - `ONCRMDYNAMICITEMDELETE`
 
-Handler: `https://<ваш-хост>/action`  
-Токен исходящего вебхука → `OUTGOING_WEBHOOK_TOKEN` в `.env`.
+Handler: `https://<host>/action`  
+Токен → `OUTGOING_WEBHOOK_TOKEN`
 
-## Что делает
+## Требования
 
-- Пишет/обновляет строки в Google Sheets по колонке **Bitrix ID**
-- При удалении карточки ставит статус **`Удалено`**
-- Фильтрует только воронки 62 / 66 / 68 внутри SPA 1106
-- Направление только Bitrix → Google
+- Python **3.10+** (лучше 3.11/3.12)
+- Входящий Bitrix webhook (`crm`)
+- Google Service Account + Sheets API
+- Таблица расшарена на email сервисного аккаунта (**Редактор**)
 
-## Настройка
-
-### 1. Bitrix incoming webhook
-
-Входящий webhook с правом **`crm`** (для CLI и чтения карточек по событию).
-
-### 2. Bitrix outgoing webhook
-
-1. URL обработчика: `https://<host>/action`
-2. События: `ONCRMDYNAMICITEMADD`, `ONCRMDYNAMICITEMUPDATE`, `ONCRMDYNAMICITEMDELETE`
-3. Токен → `OUTGOING_WEBHOOK_TOKEN`
-
-### 3. Google Service Account
-
-1. Включить **Google Sheets API**
-2. Создать Service Account → JSON в `credentials/service-account.json`
-3. Расшарить таблицу на email сервисного аккаунта (**Редактор**)
-
-### 4. Env
+## Установка
 
 ```bash
-cp .env.example .env
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env        # заполнить значения
 ```
 
-- `BITRIX_WEBHOOK_URL` — входящий webhook
-- `OUTGOING_WEBHOOK_TOKEN` — токен исходящего webhook
-- `SPREADSHEET_ID`, `SHEET_NAME=Снабжения`
+## Запуск
+
+```bash
+# полная синхронизация
+python -m app.cli --preview
+python -m app.cli --dry-run
+python -m app.cli
+
+# realtime webhook server
+python -m app.server
+```
+
+Проверка: `GET /health` → `{"ok":true}`
+
+### Plesk / Passenger
+
+- Application root: папка проекта  
+- Startup file / WSGI: `wsgi.py`  
+- Entry point: `application`  
+- Document root можно оставить отдельно; важно, чтобы запросы шли на приложение  
+
+Либо через gunicorn:
+
+```bash
+gunicorn -b 0.0.0.0:3000 wsgi:application
+```
+
+## Env
+
+См. `.env.example`:
+
+- `BITRIX_WEBHOOK_URL`
+- `OUTGOING_WEBHOOK_TOKEN`
+- `SPREADSHEET_ID`
+- `SHEET_NAME=Снабжения`
 - `GOOGLE_SERVICE_ACCOUNT_PATH`
 - `PORT=3000`
 
-## Установка и запуск
-
-Нужен **Node.js 18+** (лучше 20 LTS). На Plesk/хостинге в настройках Node.js приложения выберите версию **18/20**, не 10/12/14.
-
-```bash
-npm install          # соберёт dist/ через postinstall
-npm start            # production: node dist/server.js
-npm run sync         # полная синхронизация
-npm run sync:dry
-npm run sync:preview
-```
-
-Локальная разработка:
-
-```bash
-npm run dev          # tsx watch
-npm run dev:sync
-```
-
-На хостинге startup-файл: `dist/server.js` (или команда `npm start`).  
-Проверка: `GET /health` → `{ "ok": true }`
-
-Если ошибка `SyntaxError: Unexpected token {` в `tsx` — это старый Node. Обновите версию Node в панели хостинга.
-
 ## Колонки листа «Снабжения»
 
-Заголовки в **строке 18**, данные с **19** (до блока «Примечания»).
+Заголовки в строке **18**, данные с **19**:
 
 | A | B | C | D | E | F | G | H | I | J | K |
 |---|---|---|---|---|---|---|---|---|---|---|
-| _(пусто)_ | Наименование | _(пусто)_ | Статья затрат | Название поставщика | Сумма | Дата | Комментарии | Статус | Bitrix ID | Воронка |
-
-- Колонки **A** и **C** — разделители шаблона
-- **Название поставщика** пока пусто
-- **Дата** = `createdTime`
-- Новые карточки пишутся в свободные строки (пустой B)
-- J/K добавляются автоматически
+| пусто | Наименование | пусто | Статья затрат | Поставщик | Сумма | Дата | Комментарии | Статус | Bitrix ID | Воронка |

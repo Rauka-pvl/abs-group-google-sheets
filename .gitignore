@@ -1,6 +1,11 @@
-node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
 .env
 *.log
 credentials/*
 !credentials/.gitkeep
 .DS_Store
+node_modules/
+dist/
