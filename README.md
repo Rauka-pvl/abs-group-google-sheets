@@ -1,83 +1,78 @@
-# Bitrix → Google Sheets (Python)
+# Bitrix → Google Sheets (PHP)
 
-Синхронизация смарт-процесса **«Заявка в бухгалтерию»** (`entityTypeId=1106`) в лист **«Снабжения»**.
+Простой HTTP-обработчик исходящего вебхука Bitrix: пришёл запрос → записали в лог → обновили Google Sheets.
 
-Воронки: Служебные записки (62), Счета на оплату (66), Командировочные (68).
+Точка входа: [`action.php`](action.php)
 
-## Режимы
+## Что делает
 
-1. **CLI** — полная подтяжка через входящий webhook Bitrix  
-2. **Realtime** — Flask `POST /action` для исходящего webhook
+- Принимает POST от Bitrix
+- Логирует **весь входящий запрос** в `logs/requests.log`
+- Обрабатывает смарт-процесс **«Заявка в бухгалтерию»** (`entityTypeId=1106`)
+- Воронки: 62 / 66 / 68
+- Пишет в лист **«Снабжения»** (строка заголовков 18)
+- При удалении ставит статус `Удалено`
 
-## Важно про события
-
-Нужны события смарт-процесса (не сделки):
+## События в исходящем вебхуке Bitrix
 
 - `ONCRMDYNAMICITEMADD`
 - `ONCRMDYNAMICITEMUPDATE`
 - `ONCRMDYNAMICITEMDELETE`
 
-Handler: `https://<host>/action`  
-Токен → `OUTGOING_WEBHOOK_TOKEN`
+URL обработчика:
 
-## Требования
-
-- Python **3.10+** (лучше 3.11/3.12)
-- Входящий Bitrix webhook (`crm`)
-- Google Service Account + Sheets API
-- Таблица расшарена на email сервисного аккаунта (**Редактор**)
-
-## Установка
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env        # заполнить значения
+```text
+https://abs-group.kazgame-control.su/action.php
 ```
 
-## Запуск
+Токен исходящего вебхука → `OUTGOING_WEBHOOK_TOKEN` в `.env`.
+
+## Установка на хостинг
 
 ```bash
-# полная синхронизация
-python -m app.cli --preview
-python -m app.cli --dry-run
-python -m app.cli
-
-# realtime webhook server
-python -m app.server
+cd /var/www/abs-group.kazgame-control.su
+composer install --no-dev
+cp .env.example .env   # заполнить
+mkdir -p logs credentials
+chmod 775 logs
+# положить credentials/service-account.json
 ```
 
-Проверка: `GET /health` → `{"ok":true}`
+Проверка в браузере:
 
-### Plesk / Passenger
+```text
+https://abs-group.kazgame-control.su/action.php
+```
 
-- Application root: папка проекта  
-- Startup file / WSGI: `wsgi.py`  
-- Entry point: `application`  
-- Document root можно оставить отдельно; важно, чтобы запросы шли на приложение  
+Ожидается JSON `{"ok":true,...}`.
 
-Либо через gunicorn:
+Смотреть логи:
 
 ```bash
-gunicorn -b 0.0.0.0:3000 wsgi:application
+tail -f logs/requests.log
 ```
 
 ## Env
 
-См. `.env.example`:
-
-- `BITRIX_WEBHOOK_URL`
-- `OUTGOING_WEBHOOK_TOKEN`
+- `BITRIX_WEBHOOK_URL` — входящий webhook Bitrix (`crm`)
+- `OUTGOING_WEBHOOK_TOKEN` — токен исходящего webhook
 - `SPREADSHEET_ID`
 - `SHEET_NAME=Снабжения`
-- `GOOGLE_SERVICE_ACCOUNT_PATH`
-- `PORT=3000`
+- `GOOGLE_SERVICE_ACCOUNT_PATH=./credentials/service-account.json`
+- `LOG_FILE=./logs/requests.log`
 
-## Колонки листа «Снабжения»
+## Логи
 
-Заголовки в строке **18**, данные с **19**:
+Каждый запрос пишет в `logs/requests.log`:
 
-| A | B | C | D | E | F | G | H | I | J | K |
-|---|---|---|---|---|---|---|---|---|---|---|
-| пусто | Наименование | пусто | Статья затрат | Поставщик | Сумма | Дата | Комментарии | Статус | Bitrix ID | Воронка |
+- method / uri / ip / content-type
+- raw body
+- parsed payload
+- результат обработки / ошибки
+
+## Требования
+
+- PHP **8.1+**
+- расширения: `curl`, `json`, `mbstring`, `openssl`
+- Composer
+- Google Sheets API + service account с правом **Редактор** на таблицу
