@@ -14,72 +14,114 @@ final class SyncService
 
     public function upsert(AccountingRow $item): string
     {
-        [$idToRow, $freeSlots] = $this->loadIndex();
+        $targetSheet = $item->sheetName;
+        if ($targetSheet === null || $targetSheet === '') {
+            // No department / unknown mapping → remove from all sheets
+            $removed = $this->deleteEverywhere($item->bitrixId);
+            return $removed > 0 ? 'removed_no_department' : 'skipped_no_department';
+        }
+
+        $locations = $this->findEverywhere($item->bitrixId);
+        $removedFrom = [];
+        foreach ($locations as $sheetName => $row) {
+            if ($sheetName === $targetSheet) {
+                continue;
+            }
+            $this->sheets->clearRow($sheetName, $row['rowNumber']);
+            $removedFrom[] = $sheetName;
+        }
+
+        [$idToRow, $freeSlots] = $this->loadIndex($targetSheet);
         $next = $this->sheets->toSheetValues($item);
         $current = $idToRow[$item->bitrixId] ?? null;
 
         if ($current !== null) {
-            if ($current['values'] === $next) {
+            if ($current['values'] === $next && $removedFrom === []) {
                 return 'unchanged';
             }
-            $this->sheets->batchUpdateRows([
+            $this->sheets->batchUpdateRows($targetSheet, [
                 ['rowNumber' => $current['rowNumber'], 'values' => $next],
             ]);
-            return 'updated';
+            return $removedFrom === [] ? 'updated' : 'moved:' . implode(',', $removedFrom) . '->' . $targetSheet;
         }
 
         if ($freeSlots === []) {
             throw new \RuntimeException(
-                'No free rows on "' . $this->config->sheetName . '" between '
+                'No free rows on "' . $targetSheet . '" between '
                 . $this->config->dataStartRow . ' and ' . $this->config->dataEndRow
             );
         }
 
-        $this->sheets->batchUpdateRows([
+        $this->sheets->batchUpdateRows($targetSheet, [
             ['rowNumber' => $freeSlots[0]['rowNumber'], 'values' => $next],
         ]);
-        return 'added';
+
+        return $removedFrom === []
+            ? 'added:' . $targetSheet
+            : 'moved:' . implode(',', $removedFrom) . '->' . $targetSheet;
     }
 
-    public function markDeleted(int $bitrixId): string
+    public function deleteEverywhere(int $bitrixId): int
     {
-        [$idToRow] = $this->loadIndex();
-        $current = $idToRow[$bitrixId] ?? null;
-        if ($current === null) {
-            return 'missing';
+        $locations = $this->findEverywhere($bitrixId);
+        foreach ($locations as $sheetName => $row) {
+            $this->sheets->clearRow($sheetName, $row['rowNumber']);
         }
-        $parsed = $this->sheets->parseSheetValues($current['values']);
-        if (($parsed['status'] ?? '') === $this->config->deletedStatus) {
-            return 'unchanged';
+        return count($locations);
+    }
+
+    /** @return array<string, array{rowNumber:int, values:list<string>}> */
+    private function findEverywhere(int $bitrixId): array
+    {
+        $found = [];
+        foreach ($this->config->managedSheets as $sheetName) {
+            try {
+                $existing = $this->sheets->readDataRows($sheetName);
+            } catch (\Throwable) {
+                continue;
+            }
+            foreach ($existing as $row) {
+                $parsed = $this->sheets->parseSheetValues($row['values']);
+                if ((int) $parsed['bitrixId'] === $bitrixId) {
+                    $found[$sheetName] = $row;
+                    break;
+                }
+            }
         }
-        $marked = $current['values'];
-        $marked[8] = $this->config->deletedStatus;
-        $this->sheets->batchUpdateRows([
-            ['rowNumber' => $current['rowNumber'], 'values' => $marked],
-        ]);
-        return 'markedDeleted';
+        return $found;
     }
 
     /** @return array{0: array<int, array{rowNumber:int, values:list<string>}>, 1: list<array{rowNumber:int, values:list<string>}>} */
-    private function loadIndex(): array
+    private function loadIndex(string $sheetName): array
     {
-        $this->sheets->ensureHeader();
-        $existing = $this->sheets->readDataRows();
+        $this->sheets->ensureHeader($sheetName);
+        $existing = $this->sheets->readDataRows($sheetName);
         $idToRow = [];
-        $freeSlots = [];
+        $occupied = [];
 
         foreach ($existing as $row) {
             $parsed = $this->sheets->parseSheetValues($row['values']);
             if ($parsed['bitrixId'] !== '') {
-                $bitrixId = (int) $parsed['bitrixId'];
-                if ($bitrixId > 0) {
-                    $idToRow[$bitrixId] = $row;
+                $id = (int) $parsed['bitrixId'];
+                if ($id > 0) {
+                    $idToRow[$id] = $row;
+                    $occupied[$row['rowNumber']] = true;
                 }
                 continue;
             }
             $title = trim((string) ($row['values'][1] ?? ''));
-            if ($title === '') {
-                $freeSlots[] = $row;
+            if ($title !== '') {
+                $occupied[$row['rowNumber']] = true;
+            }
+        }
+
+        $freeSlots = [];
+        for ($n = $this->config->dataStartRow; $n <= $this->config->dataEndRow; $n++) {
+            if (!isset($occupied[$n])) {
+                $freeSlots[] = [
+                    'rowNumber' => $n,
+                    'values' => array_fill(0, 11, ''),
+                ];
             }
         }
 

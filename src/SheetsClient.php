@@ -65,16 +65,41 @@ final class SheetsClient
         ];
     }
 
-    public function ensureHeader(): void
+    public function ensureHeader(string $sheetName): void
     {
         $headerRow = $this->config->headerRow;
         $response = $this->api()->spreadsheets_values->get(
             $this->config->spreadsheetId,
-            $this->range("A{$headerRow}:K{$headerRow}")
+            $this->range($sheetName, "A{$headerRow}:K{$headerRow}")
         );
         $header = $response->getValues()[0] ?? [];
         while (count($header) < 11) {
             $header[] = '';
+        }
+
+        $isEmpty = trim(implode('', $header)) === '';
+        if ($isEmpty) {
+            $full = [
+                '',
+                self::BUSINESS_HEADERS[0],
+                '',
+                self::BUSINESS_HEADERS[1],
+                self::BUSINESS_HEADERS[2],
+                self::BUSINESS_HEADERS[3],
+                self::BUSINESS_HEADERS[4],
+                self::BUSINESS_HEADERS[5],
+                self::BUSINESS_HEADERS[6],
+                self::TECH_HEADERS[0],
+                self::TECH_HEADERS[1],
+            ];
+            $body = new ValueRange(['values' => [$full]]);
+            $this->api()->spreadsheets_values->update(
+                $this->config->spreadsheetId,
+                $this->range($sheetName, "A{$headerRow}:K{$headerRow}"),
+                $body,
+                ['valueInputOption' => 'RAW']
+            );
+            return;
         }
 
         $checks = [
@@ -89,7 +114,7 @@ final class SheetsClient
         foreach ($checks as $index => $expected) {
             if (trim((string) ($header[$index] ?? '')) !== $expected) {
                 throw new \RuntimeException(
-                    'Sheet "' . $this->config->sheetName . "\" row {$headerRow} headers do not match. "
+                    'Sheet "' . $sheetName . "\" row {$headerRow} headers do not match. "
                     . 'Expected B/D–I: ' . implode(' | ', self::BUSINESS_HEADERS)
                 );
             }
@@ -101,7 +126,7 @@ final class SheetsClient
             $body = new ValueRange(['values' => [self::TECH_HEADERS]]);
             $this->api()->spreadsheets_values->update(
                 $this->config->spreadsheetId,
-                $this->range("J{$headerRow}:K{$headerRow}"),
+                $this->range($sheetName, "J{$headerRow}:K{$headerRow}"),
                 $body,
                 ['valueInputOption' => 'RAW']
             );
@@ -109,13 +134,13 @@ final class SheetsClient
     }
 
     /** @return list<array{rowNumber:int, values:list<string>}> */
-    public function readDataRows(): array
+    public function readDataRows(string $sheetName): array
     {
         $start = $this->config->dataStartRow;
         $end = $this->config->dataEndRow;
         $response = $this->api()->spreadsheets_values->get(
             $this->config->spreadsheetId,
-            $this->range("A{$start}:K{$end}")
+            $this->range($sheetName, "A{$start}:K{$end}")
         );
         $rows = [];
         foreach ($response->getValues() ?? [] as $index => $row) {
@@ -132,7 +157,7 @@ final class SheetsClient
     }
 
     /** @param list<array{rowNumber:int, values:list<string>}> $updates */
-    public function batchUpdateRows(array $updates): void
+    public function batchUpdateRows(string $sheetName, array $updates): void
     {
         if ($updates === []) {
             return;
@@ -140,7 +165,7 @@ final class SheetsClient
         $data = [];
         foreach ($updates as $update) {
             $data[] = new ValueRange([
-                'range' => $this->range('A' . $update['rowNumber'] . ':K' . $update['rowNumber']),
+                'range' => $this->range($sheetName, 'A' . $update['rowNumber'] . ':K' . $update['rowNumber']),
                 'values' => [$update['values']],
             ]);
         }
@@ -149,6 +174,14 @@ final class SheetsClient
             'data' => $data,
         ]);
         $this->api()->spreadsheets_values->batchUpdate($this->config->spreadsheetId, $body);
+    }
+
+    public function clearRow(string $sheetName, int $rowNumber): void
+    {
+        $empty = array_fill(0, 11, '');
+        $this->batchUpdateRows($sheetName, [
+            ['rowNumber' => $rowNumber, 'values' => $empty],
+        ]);
     }
 
     private function api(): Sheets
@@ -168,9 +201,9 @@ final class SheetsClient
         return $this->service;
     }
 
-    private function range(string $a1): string
+    private function range(string $sheetName, string $a1): string
     {
-        $escaped = str_replace("'", "''", $this->config->sheetName);
+        $escaped = str_replace("'", "''", $sheetName);
         return "'{$escaped}'!{$a1}";
     }
 }

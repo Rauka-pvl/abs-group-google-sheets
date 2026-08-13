@@ -8,7 +8,6 @@ final class Config
 {
     public readonly string $bitrixWebhookUrl;
     public readonly string $spreadsheetId;
-    public readonly string $sheetName;
     public readonly string $googleServiceAccountPath;
     public readonly string $outgoingWebhookToken;
     public readonly string $logFile;
@@ -19,7 +18,11 @@ final class Config
     public readonly array $categoryNames;
     public readonly string $costArticleField;
     public readonly string $commentField;
-    public readonly string $deletedStatus;
+    public readonly string $departmentField;
+    /** @var array<int, string> enumId => sheet title */
+    public readonly array $departmentSheetMap;
+    /** @var list<string> */
+    public readonly array $managedSheets;
     public readonly int $headerRow;
     public readonly int $dataStartRow;
     public readonly int $dataEndRow;
@@ -28,7 +31,6 @@ final class Config
     {
         $this->bitrixWebhookUrl = self::normalizeWebhookUrl(self::required('BITRIX_WEBHOOK_URL'));
         $this->spreadsheetId = self::required('SPREADSHEET_ID');
-        $this->sheetName = trim((string) ($_ENV['SHEET_NAME'] ?? 'Снабжения')) ?: 'Снабжения';
         $sa = trim((string) ($_ENV['GOOGLE_SERVICE_ACCOUNT_PATH'] ?? './credentials/service-account.json'));
         $this->googleServiceAccountPath = self::absolutePath($rootDir, $sa);
         $this->outgoingWebhookToken = trim((string) ($_ENV['OUTGOING_WEBHOOK_TOKEN'] ?? ''));
@@ -44,10 +46,29 @@ final class Config
         ];
         $this->costArticleField = 'ufCrm38_1786016637295';
         $this->commentField = 'ufCrm38_1786016654344';
-        $this->deletedStatus = 'Удалено';
+        $this->departmentField = 'ufCrm38_1786011830380';
+
+        // Bitrix "Отдел" enum ID → Google sheet tab
+        $this->departmentSheetMap = [
+            216 => 'Снабжения',                 // Отдел снабжения
+            234 => 'ПТО',                       // Отдел ПТО
+            224 => 'Отдел продажа',             // Отдел МОП
+            226 => 'Отдел спецтехники',         // Отдел спецтехники
+            220 => 'Бухгалтерия',               // Финансовый отдел
+        ];
+        $this->managedSheets = array_values(array_unique(array_values($this->departmentSheetMap)));
+
         $this->headerRow = 18;
         $this->dataStartRow = 19;
         $this->dataEndRow = 98;
+    }
+
+    public function sheetForDepartmentId(?int $departmentId): ?string
+    {
+        if ($departmentId === null || $departmentId <= 0) {
+            return null;
+        }
+        return $this->departmentSheetMap[$departmentId] ?? null;
     }
 
     private static function required(string $name): string

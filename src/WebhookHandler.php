@@ -63,21 +63,33 @@ final class WebhookHandler
         }
 
         if ($event === 'ONCRMDYNAMICITEMDELETE') {
-            $action = $this->sync->markDeleted($id);
+            $removed = $this->sync->deleteEverywhere($id);
+            $action = $removed > 0 ? 'deleted_rows:' . $removed : 'missing';
             $this->logger->info('Delete processed', ['bitrixId' => $id, 'action' => $action]);
             return ['status' => 'ok', 'action' => $action, 'bitrixId' => $id];
         }
 
         $row = $this->accounting->fetchById($id);
         if ($row === null) {
-            $action = $this->sync->markDeleted($id);
-            $final = $action === 'missing' ? 'skipped_out_of_scope' : $action;
-            $this->logger->info('Out of scope / missing', ['bitrixId' => $id, 'action' => $final]);
-            return ['status' => 'ok', 'action' => $final, 'bitrixId' => $id];
+            $removed = $this->sync->deleteEverywhere($id);
+            $action = $removed > 0 ? 'deleted_out_of_scope:' . $removed : 'skipped_out_of_scope';
+            $this->logger->info('Out of scope / missing', ['bitrixId' => $id, 'action' => $action]);
+            return ['status' => 'ok', 'action' => $action, 'bitrixId' => $id];
         }
 
         $action = $this->sync->upsert($row);
-        $this->logger->info('Upsert processed', ['bitrixId' => $id, 'action' => $action]);
-        return ['status' => 'ok', 'action' => $action, 'bitrixId' => $id];
+        $this->logger->info('Upsert processed', [
+            'bitrixId' => $id,
+            'action' => $action,
+            'department' => $row->departmentName,
+            'sheet' => $row->sheetName,
+        ]);
+        return [
+            'status' => 'ok',
+            'action' => $action,
+            'bitrixId' => $id,
+            'department' => $row->departmentName,
+            'sheet' => $row->sheetName,
+        ];
     }
 }

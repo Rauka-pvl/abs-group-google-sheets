@@ -16,13 +16,16 @@ final class AccountingRow
         public readonly string $comments,
         public readonly string $status,
         public readonly string $categoryName,
+        public readonly ?int $departmentId,
+        public readonly string $departmentName,
+        public readonly ?string $sheetName,
     ) {
     }
 }
 
 final class AccountingService
 {
-    /** @var array{stageMap: array<string,string>, costArticleMap: array<string,string>, expiresAt: float}|null */
+    /** @var array{stageMap: array<string,string>, costArticleMap: array<string,string>, departmentMap: array<string,string>, expiresAt: float}|null */
     private static ?array $mapsCache = null;
 
     public function __construct(
@@ -45,25 +48,31 @@ final class AccountingService
         if (!in_array($categoryId, $this->config->categoryIds, true)) {
             return null;
         }
-        [$stageMap, $costMap] = $this->lookupMaps();
-        return $this->mapItem($item, $stageMap, $costMap);
+        [$stageMap, $costMap, $departmentMap] = $this->lookupMaps();
+        return $this->mapItem($item, $stageMap, $costMap, $departmentMap);
     }
 
-    /** @return array{0: array<string,string>, 1: array<string,string>} */
+    /** @return array{0: array<string,string>, 1: array<string,string>, 2: array<string,string>} */
     private function lookupMaps(): array
     {
         $now = microtime(true);
         if (self::$mapsCache !== null && self::$mapsCache['expiresAt'] > $now) {
-            return [self::$mapsCache['stageMap'], self::$mapsCache['costArticleMap']];
+            return [
+                self::$mapsCache['stageMap'],
+                self::$mapsCache['costArticleMap'],
+                self::$mapsCache['departmentMap'],
+            ];
         }
         $stageMap = $this->loadStageMap();
-        $costMap = $this->loadCostArticleMap();
+        $costMap = $this->loadEnumMap($this->config->costArticleField);
+        $departmentMap = $this->loadEnumMap($this->config->departmentField);
         self::$mapsCache = [
             'stageMap' => $stageMap,
             'costArticleMap' => $costMap,
+            'departmentMap' => $departmentMap,
             'expiresAt' => $now + 300,
         ];
-        return [$stageMap, $costMap];
+        return [$stageMap, $costMap, $departmentMap];
     }
 
     /** @return array<string,string> */
@@ -83,12 +92,12 @@ final class AccountingService
     }
 
     /** @return array<string,string> */
-    private function loadCostArticleMap(): array
+    private function loadEnumMap(string $fieldName): array
     {
         $result = $this->client->call('crm.item.fields', [
             'entityTypeId' => $this->config->entityTypeId,
         ]);
-        $field = is_array($result) ? ($result['fields'][$this->config->costArticleField] ?? []) : [];
+        $field = is_array($result) ? ($result['fields'][$fieldName] ?? []) : [];
         $map = [];
         foreach (($field['items'] ?? []) as $item) {
             $id = (string) ($item['ID'] ?? $item['id'] ?? '');
@@ -104,12 +113,30 @@ final class AccountingService
      * @param array<string,mixed> $item
      * @param array<string,string> $stageMap
      * @param array<string,string> $costMap
+     * @param array<string,string> $departmentMap
      */
-    private function mapItem(array $item, array $stageMap, array $costMap): AccountingRow
-    {
+    private function mapItem(
+        array $item,
+        array $stageMap,
+        array $costMap,
+        array $departmentMap,
+    ): AccountingRow {
         $categoryId = (int) ($item['categoryId'] ?? 0);
         $stageId = (string) ($item['stageId'] ?? '');
         $comment = $item[$this->config->commentField] ?? null;
+
+        $departmentRaw = $item[$this->config->departmentField] ?? null;
+        $departmentId = null;
+        if (is_numeric($departmentRaw)) {
+            $departmentId = (int) $departmentRaw;
+        } elseif (is_array($departmentRaw) && isset($departmentRaw[0]) && is_numeric($departmentRaw[0])) {
+            $departmentId = (int) $departmentRaw[0];
+        }
+
+        $departmentName = $departmentId !== null
+            ? ($departmentMap[(string) $departmentId] ?? '')
+            : '';
+
         return new AccountingRow(
             bitrixId: (int) $item['id'],
             title: (string) ($item['title'] ?? ''),
@@ -120,6 +147,9 @@ final class AccountingService
             comments: $comment === null ? '' : (string) $comment,
             status: $stageMap[$stageId] ?? $stageId,
             categoryName: $this->config->categoryNames[$categoryId] ?? ('category ' . $categoryId),
+            departmentId: $departmentId,
+            departmentName: $departmentName,
+            sheetName: $this->config->sheetForDepartmentId($departmentId),
         );
     }
 
@@ -147,8 +177,7 @@ final class AccountingService
         if (!is_numeric($value)) {
             return (string) $value;
         }
-        $formatted = number_format((float) $value, 2, ',', ' ');
-        return $formatted;
+        return number_format((float) $value, 2, ',', ' ');
     }
 
     private function formatDate(mixed $value): string
