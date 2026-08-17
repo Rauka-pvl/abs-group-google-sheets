@@ -52,6 +52,59 @@ final class AccountingService
         return $this->mapItem($item, $stageMap, $costMap, $departmentMap);
     }
 
+    private function resolveSupplier(array $item): string
+    {
+        $companyId = (int) ($item['companyId'] ?? 0);
+        if ($companyId > 0) {
+            $name = $this->fetchCompanyName($companyId);
+            if ($name !== '') {
+                return $name;
+            }
+        }
+
+        $contactId = (int) ($item['contactId'] ?? 0);
+        if ($contactId <= 0) {
+            $contactIds = $item['contactIds'] ?? [];
+            if (is_array($contactIds) && isset($contactIds[0]) && is_numeric($contactIds[0])) {
+                $contactId = (int) $contactIds[0];
+            }
+        }
+
+        if ($contactId > 0) {
+            return $this->fetchContactName($contactId);
+        }
+
+        return '';
+    }
+
+    private function fetchCompanyName(int $companyId): string
+    {
+        $result = $this->client->call('crm.company.get', ['id' => $companyId]);
+        if (!is_array($result)) {
+            return '';
+        }
+        return trim((string) ($result['TITLE'] ?? ''));
+    }
+
+    private function fetchContactName(int $contactId): string
+    {
+        $result = $this->client->call('crm.contact.get', ['id' => $contactId]);
+        if (!is_array($result)) {
+            return '';
+        }
+        $parts = array_filter([
+            trim((string) ($result['NAME'] ?? '')),
+            trim((string) ($result['SECOND_NAME'] ?? '')),
+            trim((string) ($result['LAST_NAME'] ?? '')),
+        ], static fn (string $v): bool => $v !== '');
+
+        if ($parts !== []) {
+            return implode(' ', $parts);
+        }
+
+        return trim((string) ($result['FULL_NAME'] ?? ''));
+    }
+
     /** @return array{0: array<string,string>, 1: array<string,string>, 2: array<string,string>} */
     private function lookupMaps(): array
     {
@@ -141,7 +194,7 @@ final class AccountingService
             bitrixId: (int) $item['id'],
             title: (string) ($item['title'] ?? ''),
             costArticle: $this->resolveEnum($item[$this->config->costArticleField] ?? null, $costMap),
-            supplier: '',
+            supplier: $this->resolveSupplier($item),
             amount: $this->formatAmount($item['opportunity'] ?? null),
             date: $this->formatDate($item['createdTime'] ?? null),
             comments: $comment === null ? '' : (string) $comment,
