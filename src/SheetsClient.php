@@ -25,6 +25,9 @@ final class SheetsClient
 
     private ?Sheets $service = null;
 
+    /** @var array<string, array{headerRow:int, dataStartRow:int, dataEndRow:int}> */
+    private array $layoutCache = [];
+
     public function __construct(private readonly Config $config)
     {
     }
@@ -65,9 +68,47 @@ final class SheetsClient
         ];
     }
 
+    /** @return array{headerRow:int, dataStartRow:int, dataEndRow:int} */
+    public function resolveLayout(string $sheetName): array
+    {
+        if (isset($this->layoutCache[$sheetName])) {
+            return $this->layoutCache[$sheetName];
+        }
+
+        $response = $this->api()->spreadsheets_values->get(
+            $this->config->spreadsheetId,
+            $this->range($sheetName, 'A1:K40')
+        );
+        $rows = $response->getValues() ?? [];
+
+        $headerRow = null;
+        foreach ($rows as $index => $row) {
+            $b = trim((string) ($row[1] ?? ''));
+            if ($b === 'Наименование') {
+                $headerRow = $index + 1;
+                break;
+            }
+        }
+
+        if ($headerRow === null) {
+            // Empty / unknown sheet → use default template rows
+            $headerRow = $this->config->headerRow;
+        }
+
+        $layout = [
+            'headerRow' => $headerRow,
+            'dataStartRow' => $headerRow + 1,
+            'dataEndRow' => $headerRow + 80,
+        ];
+        $this->layoutCache[$sheetName] = $layout;
+        return $layout;
+    }
+
     public function ensureHeader(string $sheetName): void
     {
-        $headerRow = $this->config->headerRow;
+        $layout = $this->resolveLayout($sheetName);
+        $headerRow = $layout['headerRow'];
+
         $response = $this->api()->spreadsheets_values->get(
             $this->config->spreadsheetId,
             $this->range($sheetName, "A{$headerRow}:K{$headerRow}")
@@ -102,22 +143,28 @@ final class SheetsClient
             return;
         }
 
+        $commentHeader = trim((string) ($header[7] ?? ''));
         $checks = [
-            1 => self::BUSINESS_HEADERS[0],
-            3 => self::BUSINESS_HEADERS[1],
-            4 => self::BUSINESS_HEADERS[2],
-            5 => self::BUSINESS_HEADERS[3],
-            6 => self::BUSINESS_HEADERS[4],
-            7 => self::BUSINESS_HEADERS[5],
-            8 => self::BUSINESS_HEADERS[6],
+            1 => ['Наименование'],
+            3 => ['Статья затрат'],
+            4 => ['Название поставщика'],
+            5 => ['Сумма'],
+            6 => ['Дата'],
+            8 => ['Статус'],
         ];
-        foreach ($checks as $index => $expected) {
-            if (trim((string) ($header[$index] ?? '')) !== $expected) {
+        foreach ($checks as $index => $allowed) {
+            $actual = trim((string) ($header[$index] ?? ''));
+            if (!in_array($actual, $allowed, true)) {
                 throw new \RuntimeException(
                     'Sheet "' . $sheetName . "\" row {$headerRow} headers do not match. "
-                    . 'Expected B/D–I: ' . implode(' | ', self::BUSINESS_HEADERS)
+                    . "Col " . chr(65 + $index) . " got \"{$actual}\""
                 );
             }
+        }
+        if (!in_array($commentHeader, ['Комментарии', 'Комментарий'], true)) {
+            throw new \RuntimeException(
+                'Sheet "' . $sheetName . "\" row {$headerRow}: expected Комментарии/Комментарий, got \"{$commentHeader}\""
+            );
         }
 
         $needTech = trim((string) ($header[9] ?? '')) !== self::TECH_HEADERS[0]
@@ -136,8 +183,9 @@ final class SheetsClient
     /** @return list<array{rowNumber:int, values:list<string>}> */
     public function readDataRows(string $sheetName): array
     {
-        $start = $this->config->dataStartRow;
-        $end = $this->config->dataEndRow;
+        $layout = $this->resolveLayout($sheetName);
+        $start = $layout['dataStartRow'];
+        $end = $layout['dataEndRow'];
         $response = $this->api()->spreadsheets_values->get(
             $this->config->spreadsheetId,
             $this->range($sheetName, "A{$start}:K{$end}")

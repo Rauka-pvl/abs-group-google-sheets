@@ -46,9 +46,10 @@ final class SyncService
         }
 
         if ($freeSlots === []) {
+            $layout = $this->sheets->resolveLayout($targetSheet);
             throw new \RuntimeException(
                 'No free rows on "' . $targetSheet . '" between '
-                . $this->config->dataStartRow . ' and ' . $this->config->dataEndRow
+                . $layout['dataStartRow'] . ' and ' . $layout['dataEndRow']
             );
         }
 
@@ -95,6 +96,7 @@ final class SyncService
     private function loadIndex(string $sheetName): array
     {
         $this->sheets->ensureHeader($sheetName);
+        $layout = $this->sheets->resolveLayout($sheetName);
         $existing = $this->sheets->readDataRows($sheetName);
         $idToRow = [];
         $occupied = [];
@@ -116,7 +118,7 @@ final class SyncService
         }
 
         $freeSlots = [];
-        for ($n = $this->config->dataStartRow; $n <= $this->config->dataEndRow; $n++) {
+        for ($n = $layout['dataStartRow']; $n <= $layout['dataEndRow']; $n++) {
             if (!isset($occupied[$n])) {
                 $freeSlots[] = [
                     'rowNumber' => $n,
