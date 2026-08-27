@@ -122,7 +122,7 @@ final class SyncService
             if (!isset($occupied[$n])) {
                 $freeSlots[] = [
                     'rowNumber' => $n,
-                    'values' => array_fill(0, 11, ''),
+                    'values' => array_fill(0, 12, ''),
                 ];
             }
         }

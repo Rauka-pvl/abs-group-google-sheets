@@ -49,15 +49,18 @@ final class Config
         $this->departmentField = 'ufCrm38_1786011830380';
 
         // Bitrix "Отдел" enum ID → Google sheet tab
+        // Остальные отделы (не из карты) → лист «АУП»
         $this->departmentSheetMap = [
             216 => 'Снабжения',                 // Отдел снабжения
             234 => 'ПТО',                       // Отдел ПТО
             224 => 'Отдел продажа',             // Отдел МОП
             226 => 'Отдел спецтехники',         // Отдел спецтехники
             230 => 'Отдел энергетики',          // Отдел производства
-            // 220 Финансовый отдел → Бухгалтерия — пока отключено
         ];
-        $this->managedSheets = array_values(array_unique(array_values($this->departmentSheetMap)));
+        $this->managedSheets = array_values(array_unique(array_merge(
+            array_values($this->departmentSheetMap),
+            ['АУП']
+        )));
 
         $this->headerRow = 18;
         $this->dataStartRow = 19;
@@ -69,7 +72,7 @@ final class Config
         if ($departmentId === null || $departmentId <= 0) {
             return null;
         }
-        return $this->departmentSheetMap[$departmentId] ?? null;
+        return $this->departmentSheetMap[$departmentId] ?? 'АУП';
     }
 
     private static function required(string $name): string

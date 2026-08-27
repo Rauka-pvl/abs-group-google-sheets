@@ -21,7 +21,10 @@ final class SheetsClient
         'Статус',
     ];
 
-    public const TECH_HEADERS = ['Bitrix ID', 'Воронка'];
+    /** J / K / L */
+    public const TECH_HEADERS = ['Bitrix ID', 'Воронка', 'Отделение'];
+
+    private const COL_COUNT = 12; // A..L
 
     private ?Sheets $service = null;
 
@@ -46,13 +49,14 @@ final class SheetsClient
             $row->status,
             (string) $row->bitrixId,
             $row->categoryName,
+            $row->departmentName,
         ];
     }
 
     /** @param list<string> $values */
     public function parseSheetValues(array $values): array
     {
-        while (count($values) < 11) {
+        while (count($values) < self::COL_COUNT) {
             $values[] = '';
         }
         return [
@@ -65,6 +69,7 @@ final class SheetsClient
             'status' => $values[8],
             'bitrixId' => trim((string) $values[9]),
             'categoryName' => $values[10],
+            'departmentName' => $values[11],
         ];
     }
 
@@ -77,7 +82,7 @@ final class SheetsClient
 
         $response = $this->api()->spreadsheets_values->get(
             $this->config->spreadsheetId,
-            $this->range($sheetName, 'A1:K40')
+            $this->range($sheetName, 'A1:L40')
         );
         $rows = $response->getValues() ?? [];
 
@@ -91,7 +96,6 @@ final class SheetsClient
         }
 
         if ($headerRow === null) {
-            // Empty / unknown sheet → use default template rows
             $headerRow = $this->config->headerRow;
         }
 
@@ -111,10 +115,10 @@ final class SheetsClient
 
         $response = $this->api()->spreadsheets_values->get(
             $this->config->spreadsheetId,
-            $this->range($sheetName, "A{$headerRow}:K{$headerRow}")
+            $this->range($sheetName, "A{$headerRow}:L{$headerRow}")
         );
         $header = $response->getValues()[0] ?? [];
-        while (count($header) < 11) {
+        while (count($header) < self::COL_COUNT) {
             $header[] = '';
         }
 
@@ -132,11 +136,12 @@ final class SheetsClient
                 self::BUSINESS_HEADERS[6],
                 self::TECH_HEADERS[0],
                 self::TECH_HEADERS[1],
+                self::TECH_HEADERS[2],
             ];
             $body = new ValueRange(['values' => [$full]]);
             $this->api()->spreadsheets_values->update(
                 $this->config->spreadsheetId,
-                $this->range($sheetName, "A{$headerRow}:K{$headerRow}"),
+                $this->range($sheetName, "A{$headerRow}:L{$headerRow}"),
                 $body,
                 ['valueInputOption' => 'RAW']
             );
@@ -168,12 +173,13 @@ final class SheetsClient
         }
 
         $needTech = trim((string) ($header[9] ?? '')) !== self::TECH_HEADERS[0]
-            || trim((string) ($header[10] ?? '')) !== self::TECH_HEADERS[1];
+            || trim((string) ($header[10] ?? '')) !== self::TECH_HEADERS[1]
+            || trim((string) ($header[11] ?? '')) !== self::TECH_HEADERS[2];
         if ($needTech) {
             $body = new ValueRange(['values' => [self::TECH_HEADERS]]);
             $this->api()->spreadsheets_values->update(
                 $this->config->spreadsheetId,
-                $this->range($sheetName, "J{$headerRow}:K{$headerRow}"),
+                $this->range($sheetName, "J{$headerRow}:L{$headerRow}"),
                 $body,
                 ['valueInputOption' => 'RAW']
             );
@@ -188,17 +194,17 @@ final class SheetsClient
         $end = $layout['dataEndRow'];
         $response = $this->api()->spreadsheets_values->get(
             $this->config->spreadsheetId,
-            $this->range($sheetName, "A{$start}:K{$end}")
+            $this->range($sheetName, "A{$start}:L{$end}")
         );
         $rows = [];
         foreach ($response->getValues() ?? [] as $index => $row) {
             $normalized = array_map(static fn ($c) => (string) ($c ?? ''), $row);
-            while (count($normalized) < 11) {
+            while (count($normalized) < self::COL_COUNT) {
                 $normalized[] = '';
             }
             $rows[] = [
                 'rowNumber' => $start + (int) $index,
-                'values' => array_slice($normalized, 0, 11),
+                'values' => array_slice($normalized, 0, self::COL_COUNT),
             ];
         }
         return $rows;
@@ -213,7 +219,7 @@ final class SheetsClient
         $data = [];
         foreach ($updates as $update) {
             $data[] = new ValueRange([
-                'range' => $this->range($sheetName, 'A' . $update['rowNumber'] . ':K' . $update['rowNumber']),
+                'range' => $this->range($sheetName, 'A' . $update['rowNumber'] . ':L' . $update['rowNumber']),
                 'values' => [$update['values']],
             ]);
         }
@@ -226,7 +232,7 @@ final class SheetsClient
 
     public function clearRow(string $sheetName, int $rowNumber): void
     {
-        $empty = array_fill(0, 11, '');
+        $empty = array_fill(0, self::COL_COUNT, '');
         $this->batchUpdateRows($sheetName, [
             ['rowNumber' => $rowNumber, 'values' => $empty],
         ]);
